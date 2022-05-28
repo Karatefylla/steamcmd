@@ -1,0 +1,89 @@
+############################################################
+# Dockerfile that contains SteamCMD running in Wine
+############################################################
+FROM docker.io/ubuntu:latest
+
+LABEL maintainer="CarlG <carlg@karatefylla.nu>"
+
+ARG PUID=1000
+
+ENV USER steam
+ENV HOMEDIR "/home/${USER}"
+ENV STEAMCMD_DIR "${HOMEDIR}/steamcmd"
+
+ENV KEYRINGS /usr/local/share/keyrings
+ENV WINEDEBUG "-all"
+ENV TZ "Europe/Stockholm"
+
+ARG STEAM_APP_DIR
+ENV STEAM_APP_DIR "${STEAM_APP_DIR:-${HOMEDIR}/data}"
+
+ENV STEAM_APP_ID ""
+ENV STEAM_APP_NAME ""
+
+USER root
+
+RUN set -eux; \
+	adduser \
+	--disabled-login \
+	--disabled-password \
+	--shell /bin/bash \
+	--uid ${PUID} \
+	${USER}; \
+	usermod -G tty ${USER}
+
+RUN set -eux; \
+	export DEBIAN_FRONTEND noninteractive; \
+	dpkg --add-architecture i386; \
+	apt update; \
+	apt install -y --no-install-recommends --no-install-suggests \
+	net-tools \
+	gnupg2 \
+	tar \
+	curl \
+	unzip \
+	locales \
+	curl \
+	wget \
+	tzdata \
+	xz-utils \
+	gnupg2 \
+	software-properties-common \
+	xvfb; \
+	sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen; \
+	dpkg-reconfigure --frontend=noninteractive locales
+
+RUN set -eux; \
+    mkdir -p $KEYRINGS; \
+    curl --fail https://dl.winehq.org/wine-builds/winehq.key | gpg --dearmor > $KEYRINGS/winehq.gpg; \
+    echo "deb [signed-by=$KEYRINGS/winehq.gpg] https://dl.winehq.org/wine-builds/ubuntu/ $(lsb_release -cs) main" > /etc/apt/sources.list.d/winehq.list;
+
+RUN set -eux; \
+	export DEBIAN_FRONTEND noninteractive; \
+	apt update; \
+	apt install -y --install-recommends \
+	winehq-staging
+
+RUN curl -L https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks > /usr/bin/winetricks; \
+	chmod +x /usr/bin/winetricks
+
+RUN set -eux; \
+	apt-get remove --purge --auto-remove -y; \
+	rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+	mkdir -p "${STEAMCMD_DIR}"; \
+	curl -L 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz' | tar xvzf - -C "${STEAMCMD_DIR}"; \
+	"./${STEAMCMD_DIR}/steamcmd.sh" +quit; \
+	mkdir -p "${HOMEDIR}/.steam/sdk32"; \
+	ln -s "${STEAMCMD_DIR}/linux32/steamclient.so" "${HOMEDIR}/.steam/sdk32/steamclient.so"; \
+	ln -s "${STEAMCMD_DIR}/linux32/steamcmd" "${STEAMCMD_DIR}/linux32/steam"; \
+	ln -s "${STEAMCMD_DIR}/steamcmd.sh" "${STEAMCMD_DIR}/steam.sh"; \
+	ln -s "${STEAMCMD_DIR}/linux64/steamclient.so" "/usr/lib/x86_64-linux-gnu/steamclient.so"
+
+RUN set -eux; \
+	mkdir -p "${STEAM_APP_DIR}"; \
+	chown -R "${USER}:${USER}" "${STEAM_APP_DIR}" "${STEAMCMD_DIR}"
+
+USER ${USER}
+
